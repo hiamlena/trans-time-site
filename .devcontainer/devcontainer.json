@@ -1,0 +1,6 @@
+{
+  "name": "Trans-Time Dev",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:18",
+  "postCreateCommand": "npm i -g http-server && npm i",
+  "forwardPorts": [5173]
+}

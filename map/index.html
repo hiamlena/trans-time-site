@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Trans-Time — Маршрут для грузовиков в России</title>
+  <meta name="description" content="Планируйте маршруты с учётом ограничений и весовых рамок.">
+  <meta name="keywords" content="маршрут грузовиков Москва, логистика Россия, HGV маршрутизация">
+  <meta property="og:title" content="Trans-Time — Маршрут для грузовиков в России">
+  <meta property="og:description" content="Планируйте маршруты с учётом ограничений и весовых рамок.">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="/assets/og.jpg">
+  <meta property="og:url" content="/map/">
+  <link rel="icon" href="../assets/logo-tt.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../assets/style.css">
+  <script src="https://api-maps.yandex.ru/2.1/?lang=ru_RU&apikey=317aa42d-aa15-4acf-885a-6d6bfddb2339&suggest_apikey=317aa42d-aa15-4acf-885a-6d6bfddb2339" defer></script>
+</head>
+<body data-page="map">
+  <header>
+    <nav class="navbar">
+      <a class="brand" href="/">
+        <img src="../assets/logo-tt.svg" alt="Trans-Time">
+        <span>Trans-Time</span>
+      </a>
+      <div class="nav-links">
+        <a href="/" data-page="home">Главная</a>
+        <a href="/map/" data-page="map">Карта</a>
+        <a href="/about.html" data-page="about">О сервисе</a>
+        <a href="/services.html" data-page="services">Услуги</a>
+        <a href="/blog.html" data-page="blog">Блог</a>
+        <a href="/contacts.html" data-page="contacts">Контакты</a>
+      </div>
+    </nav>
+  </header>
+
+  <main class="map-layout">
+    <aside class="map-panel">
+      <form id="route-form">
+        <input id="from" type="text" placeholder="Откуда" autocomplete="off">
+        <input id="to" type="text" placeholder="Куда" autocomplete="off">
+        <div class="radio-group">
+          <label>
+            <input type="radio" name="vehicle" value="car" checked>
+            Легковой
+          </label>
+          <label>
+            <input type="radio" name="vehicle" value="truck40">
+            Грузовой ≤40т
+          </label>
+          <label>
+            <input type="radio" name="vehicle" value="truckHeavy">
+            Грузовой >40т
+          </label>
+        </div>
+        <div style="display:flex;gap:0.75rem;flex-wrap:wrap;">
+          <button type="button" id="build" class="btn primary" style="flex:1;min-width:160px;">Построить маршрут</button>
+          <button type="button" id="reset-via" class="btn" style="min-width:160px;">Сбросить via-точки</button>
+        </div>
+      </form>
+      <section class="map-legend">
+        <div class="legend-item">
+          <span class="legend-swatch" style="background: var(--ok);"></span>
+          <span>Зелёный — активный маршрут</span>
+        </div>
+        <div class="legend-item">
+          <span class="legend-swatch" style="background: var(--alt);"></span>
+          <span>Оранжевый — альтернативы</span>
+        </div>
+        <div class="legend-item">
+          <span class="legend-swatch" style="background: var(--blue);"></span>
+          <span>Синий — весовые рамки</span>
+        </div>
+      </section>
+      <div class="alternatives" id="alternatives"></div>
+    </aside>
+    <div class="map-wrapper">
+      <div id="map" class="map-canvas"></div>
+    </div>
+  </main>
+
+  <footer>
+    © 2024 Trans-Time. Все права защищены.
+  </footer>
+
+  <script src="../assets/script.js" defer></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      if (!window.ymaps) {
+        console.error('Yandex Maps API не загрузился');
+        return;
+      }
+
+      ymaps.ready(initMap);
+
+      function initMap() {
+        const state = {
+          vehicle: 'car',
+          viaPoints: [],
+          manualPlacemarks: [],
+          multiRoute: null,
+          objectManager: null,
+          frames: []
+        };
+
+        const map = new ymaps.Map('map', {
+          center: [55.751244, 37.618423],
+          zoom: 8,
+          controls: ['zoomControl', 'geolocationControl', 'typeSelector', 'fullscreenControl']
+        });
+
+        const fromInput = document.getElementById('from');
+        const toInput = document.getElementById('to');
+        const buildBtn = document.getElementById('build');
+        const resetBtn = document.getElementById('reset-via');
+        const alternativesEl = document.getElementById('alternatives');
+
+        new ymaps.SuggestView('from');
+        new ymaps.SuggestView('to');
+
+        map.events.add('click', (event) => {
+          const coords = event.get('coords');
+          const confirmed = confirm(`Добавить via-точку ${coords[0].toFixed(5)}, ${coords[1].toFixed(5)}?`);
+          if (!confirmed) return;
+          addManualVia(coords);
+          if (fromInput.value && toInput.value) {
+            buildRoute();
+          }
+        });
+
+        document.getElementById('route-form').addEventListener('submit', (e) => {
+          e.preventDefault();
+        });
+
+        document.querySelectorAll('input[name="vehicle"]').forEach((input) => {
+          input.addEventListener('change', () => {
+            state.vehicle = input.value;
+            if (state.multiRoute) {
+              buildRoute();
+            }
+          });
+        });
+
+        buildBtn.addEventListener('click', () => buildRoute());
+        resetBtn.addEventListener('click', () => {
+          state.viaPoints = [];
+          state.manualPlacemarks.forEach((placemark) => map.geoObjects.remove(placemark));
+          state.manualPlacemarks = [];
+          window.showToast('Все via-точки удалены.', 'success');
+        });
+
+        loadFrames();
+
+        function addManualVia(coords) {
+          state.viaPoints.push(coords);
+          const placemark = new ymaps.Placemark(coords, {
+            iconCaption: `Via ${state.viaPoints.length}`
+          }, {
+            preset: 'islands#blueCircleIcon'
+          });
+          state.manualPlacemarks.push(placemark);
+          map.geoObjects.add(placemark);
+        }
+
+        function loadFrames() {
+          fetch('data/frames_ready.geojson?v=' + Date.now(), { cache: 'no-store' })
+            .then((response) => response.json())
+            .then((data) => {
+              state.frames = data.features || [];
+              state.objectManager = new ymaps.ObjectManager({ clusterize: false });
+              state.objectManager.objects.options.set('preset', 'islands#blueCircleDotIcon');
+              state.objectManager.add(data);
+              map.geoObjects.add(state.objectManager);
+            })
+            .catch(() => {
+              window.showToast('Не удалось загрузить данные весовых рамок.', 'error');
+            });
+        }
+
+        function geocodeAddress(query) {
+          return ymaps.geocode(query, { results: 1 }).then((res) => {
+            if (!res.geoObjects.getLength()) {
+              throw new Error('Адрес не найден');
+            }
+            return res.geoObjects.get(0).geometry.getCoordinates();
+          });
+        }
+
+        function convertFrameCoords(feature) {
+          const [lon, lat] = feature.geometry.coordinates;
+          return [lat, lon];
+        }
+
+        function computeBypassPoints(start, end) {
+          if (!state.frames.length) return [];
+          const results = [];
+          let sign = 1;
+          const inverse = ymaps.coordSystem.geo.solveInverse(start, end);
+          const azimuth = inverse ? inverse.azimuth : 0;
+
+          state.frames.forEach((feature) => {
+            const frameCoords = convertFrameCoords(feature);
+            const frameName = feature.properties?.name || 'рамка';
+            const distanceToStart = ymaps.coordSystem.geo.getDistance(start, frameCoords);
+            const distanceToEnd = ymaps.coordSystem.geo.getDistance(end, frameCoords);
+            if (distanceToStart < 100 || distanceToEnd < 100) {
+              const offsetAzimuth = azimuth + sign * Math.PI / 2;
+              const shifted = ymaps.coordSystem.geo.solveDirect(frameCoords, offsetAzimuth, 200);
+              if (shifted && shifted.position) {
+                results.push({ coords: shifted.position, name: frameName });
+                sign *= -1;
+              }
+            }
+          });
+
+          return results;
+        }
+
+        function buildRoute() {
+          const fromValue = fromInput.value.trim();
+          const toValue = toInput.value.trim();
+          if (!fromValue || !toValue) {
+            window.showToast('Укажи Откуда и Куда.', 'error');
+            return;
+          }
+
+          Promise.all([geocodeAddress(fromValue), geocodeAddress(toValue)])
+            .then(([fromCoords, toCoords]) => {
+              let referencePoints = [fromCoords, ...state.viaPoints, toCoords];
+
+              if (state.vehicle !== 'car') {
+                const bypasses = computeBypassPoints(fromCoords, toCoords);
+                bypasses.forEach((item) => {
+                  referencePoints.splice(referencePoints.length - 1, 0, item.coords);
+                  window.showToast(`Объезд весовой рамки у ${item.name}`, 'info');
+                });
+              }
+
+              const params = { results: 3, avoidTrafficJams: true };
+              if (state.vehicle === 'truck40') {
+                params.routingMode = 'truck';
+                params.truck = { weight: 40000 };
+              } else if (state.vehicle === 'truckHeavy') {
+                params.routingMode = 'truck';
+                params.truck = { weight: 50000, axleCount: 5 };
+              } else {
+                params.routingMode = 'auto';
+              }
+
+              if (state.multiRoute) {
+                map.geoObjects.remove(state.multiRoute);
+              }
+
+              state.multiRoute = new ymaps.multiRouter.MultiRoute({
+                referencePoints,
+                params
+              }, {
+                boundsAutoApply: true,
+                wayPointDraggable: false,
+                viaPointDraggable: true
+              });
+
+              state.multiRoute.model.events.add('requestsuccess', () => {
+                updateAlternatives();
+                const active = state.multiRoute.getActiveRoute();
+                if (active) {
+                  const distance = active.properties.get('distance');
+                  const duration = active.properties.get('duration');
+                  const distanceText = distance ? distance.text : '';
+                  const durationText = duration ? duration.text : '';
+                  window.showToast(`Активный маршрут: ${distanceText} • ${durationText}`, 'success');
+                }
+              });
+
+              state.multiRoute.model.events.add('requestfail', () => {
+                window.showToast('Не удалось построить маршрут.', 'error');
+              });
+
+              state.multiRoute.events.add('activeroutechange', () => {
+                updateAlternatives();
+              });
+
+              map.geoObjects.add(state.multiRoute);
+            })
+            .catch((error) => {
+              const message = error && error.message === 'Адрес не найден'
+                ? 'Адрес не найден.'
+                : 'Не удалось построить маршрут.';
+              window.showToast(message, 'error');
+            });
+        }
+
+        function updateAlternatives() {
+          if (!state.multiRoute) return;
+          const routes = state.multiRoute.getRoutes();
+          alternativesEl.innerHTML = '';
+
+          routes.forEach((route, index) => {
+            if (index > 2) return;
+            const distance = route.properties.get('distance');
+            const duration = route.properties.get('duration');
+            const div = document.createElement('div');
+            div.className = 'alternative';
+            if (route === state.multiRoute.getActiveRoute()) {
+              div.classList.add('active');
+            }
+            div.innerHTML = `<strong>Маршрут ${index + 1}</strong><br>${distance ? distance.text : ''} • ${duration ? duration.text : ''}`;
+            div.addEventListener('click', () => {
+              state.multiRoute.setActiveRoute(route);
+              window.showToast(`Активирован маршрут ${index + 1}`, 'info');
+            });
+            alternativesEl.appendChild(div);
+          });
+        }
+      }
+    });
+  </script>
+</body>
+</html>

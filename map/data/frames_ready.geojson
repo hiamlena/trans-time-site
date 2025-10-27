@@ -1,0 +1,65 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "МКАД, 47 км",
+        "comment": "Пункт весового контроля на внешней стороне",
+        "date": "2024-02-15"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [37.5078, 55.7894]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Химки, Ленинградское ш.",
+        "comment": "Перед въездом в Москву",
+        "date": "2024-01-12"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [37.4352, 55.8973]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Домодедово, Каширское ш.",
+        "comment": "Контроль грузового потока",
+        "date": "2023-12-02"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [37.7668, 55.4003]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Подольск, Варшавское ш.",
+        "comment": "Перед мостом через Пахру",
+        "date": "2024-03-08"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [37.5485, 55.4312]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Мытищи, Осташковское ш.",
+        "comment": "Перед развязкой с МКАД",
+        "date": "2024-04-20"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [37.7016, 55.9231]
+      }
+    }
+  ]
+}
